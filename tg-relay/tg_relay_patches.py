@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "term-bridge"))
 
 from iterm_route import format_tabs_message, parse_routed_message
 from iterm_target import apply_target_env, resolve_target
+from tg_format_config import VALID as _FORMATS, get_format, set_format
 
 
 def _inject_iterm(text: str, target=None) -> tuple[int, str]:
@@ -106,7 +107,8 @@ def apply(mod: ModuleType) -> None:
                 "/tap X Y [android|ios]\n"
                 "/swipe X1 Y1 X2 Y2 [android|ios]\n"
                 "/devices — list devices\n"
-                "/tabs — list iTerm tabs + routing hints\n\n"
+                "/tabs — list iTerm tabs + routing hints\n"
+                "/format html|markdown|plain|screenshot — 回传格式\n\n"
                 "Natural language -> iTerm + inbox\n"
                 "  Prefix examples:\n"
                 "  [t2] question — tab 2\n"
@@ -117,6 +119,20 @@ def apply(mod: ModuleType) -> None:
             )
         if cmd == "/tabs":
             return format_tabs_message()[:4000]
+        if cmd.startswith("/format") or cmd.startswith("/fmt"):
+            prefix = "/format" if cmd.startswith("/format") else "/fmt"
+            glued = cmd[len(prefix):].lstrip("-_:")  # /format-html → html
+            value = glued or (parts[1] if len(parts) > 1 else "")
+            if not value:
+                return (
+                    f"当前回传格式: {get_format()}\n"
+                    f"可选: {' | '.join(_FORMATS)}\n"
+                    "用法: /format html  （也可 /format-markdown）"
+                )
+            norm = set_format(value)
+            if norm is None:
+                return f"未知格式: {value}\n可选: {' | '.join(_FORMATS)}"
+            return f"✓ 回传格式已设为 {norm}（立即生效，无需重启）"
         return orig_cmd(text)
 
     mod._handle_natural_language = handle_natural_language

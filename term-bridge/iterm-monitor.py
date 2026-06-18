@@ -21,6 +21,7 @@ from iterm_extract import (  # noqa: E402
 )
 from iterm_target import resolve_target  # noqa: E402
 from tg_format import format_reply, strip_terminal_noise  # noqa: E402
+from tg_format_config import get_format  # noqa: E402
 
 
 def _monitor_file(kind: str) -> Path:
@@ -174,15 +175,11 @@ def _send_iterm_screenshot() -> tuple[int, str]:
     return r.returncode, out or "screenshot failed"
 
 def _output_format() -> str:
-    """TG_ITERM_FORMAT: html (default) | markdown | plain | screenshot."""
-    v = os.environ.get("TG_ITERM_FORMAT", "html").strip().lower()
-    if v in ("md", "markdownv2"):
-        return "markdown"
-    if v in ("text", "none"):
-        return "plain"
-    if v in ("html", "markdown", "plain", "screenshot"):
-        return v
-    return "html"
+    """Current format: Telegram /format state file → env TG_ITERM_FORMAT → html.
+
+    Read fresh each send so a /format command takes effect without a restart.
+    """
+    return get_format()
 
 
 def _run_send(env: dict, chat_id: int, text: str, parse_mode: str | None) -> tuple[int, str]:
