@@ -22,8 +22,9 @@ class SpawnResult:
 
 
 def _usage() -> str:
+    keys = "|".join(valid_keys())
     return (
-        "用法: /new claude|codex [初始提示词]\n"
+        f"用法: /new {keys} [初始提示词]\n"
         f"可用 agent: {', '.join(valid_keys())}"
     )
 
@@ -53,7 +54,7 @@ def handle_new(
         return (f"spawn 失败:\n{res.raw[:800]}", None)
 
     preview = (prompt[:80] + ("…" if len(prompt) > 80 else "")) if prompt else "(无初始提示)"
-    where = res.workdir or f"~/fullStar/<ts>"
+    where = res.workdir or "~/fullStar/<ts>"
     tabnote = f"tab {res.tab}" if res.tab is not None else "新 tab"
     reply = (
         f"✓ 已启动 {key} @ {where} ({tabnote})\n"

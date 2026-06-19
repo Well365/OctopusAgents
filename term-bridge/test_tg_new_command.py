@@ -22,9 +22,11 @@ def test_parse_agent_and_prompt():
 
 
 def test_bare_new_gives_usage_no_tab():
+    from agent_cli import valid_keys
     reply, tab = nc.handle_new([], is_macos=True, spawn=_ok)
     assert tab is None
     assert "claude" in reply and "codex" in reply
+    assert ", ".join(valid_keys()) in reply
 
 
 def test_unknown_agent_lists_valid():
@@ -38,6 +40,7 @@ def test_non_macos_message():
     reply, tab = nc.handle_new(["claude"], is_macos=False, spawn=_ok)
     assert tab is None
     assert "macOS" in reply
+    assert tab is None
 
 
 def test_success_returns_tab_and_mentions_dir():
