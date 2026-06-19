@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "term-bridge"))
+from chat_allowlist import is_allowed, resolve_allowlist  # noqa: E402
 from tg_menu import MENU_COMMANDS, dispatch_callback, menu_for_command  # noqa: E402
 
 INBOX_DIR = ROOT / "inbox"
@@ -223,6 +224,19 @@ def main() -> int:
         print("pip install python-telegram-bot", file=sys.stderr)
         return 1
 
+    allowed = resolve_allowlist(
+        os.environ.get("TG_RELAY_ALLOWED_CHAT_IDS", ""),
+        os.environ.get("TELEGRAM_CHAT_ID", ""),
+    )
+    if allowed:
+        print(f"chat allow-list active: {sorted(allowed)}")
+    else:
+        print(
+            "WARNING: no chat allow-list (set TG_RELAY_ALLOWED_CHAT_IDS or "
+            "TELEGRAM_CHAT_ID) — bot accepts all chats",
+            file=sys.stderr,
+        )
+
     def _keyboard(rows):
         return InlineKeyboardMarkup(
             [[InlineKeyboardButton(label, callback_data=data)] for label, data in rows]
@@ -231,8 +245,12 @@ def main() -> int:
     async def on_message(update: Update, context) -> None:
         if not update.message or not update.message.text:
             return
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not is_allowed(chat_id, allowed):
+            print(f"ignored message from unauthorized chat {chat_id}", file=sys.stderr)
+            return
         text = update.message.text.strip()
-        chat_id = update.effective_chat.id or 0
+        chat_id = chat_id or 0
         if text.startswith("/"):
             sub = menu_for_command(text)
             if sub:
@@ -247,12 +265,20 @@ def main() -> int:
         q = update.callback_query
         if not q:
             return
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not is_allowed(chat_id, allowed):
+            await q.answer("未授权", show_alert=False)
+            return
         await q.answer()
         reply = dispatch_callback(q.data or "", _handle_command)
         await q.edit_message_text(reply[:4000])
 
     async def start_cmd(update: Update, context) -> None:
         if not update.message:
+            return
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not is_allowed(chat_id, allowed):
+            print(f"ignored /start from unauthorized chat {chat_id}", file=sys.stderr)
             return
         await update.message.reply_text(_handle_command("/help"))
 
