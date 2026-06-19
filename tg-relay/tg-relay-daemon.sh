@@ -149,12 +149,12 @@ start_cmd() {
   if [[ "$fg" -eq 1 ]]; then
     echo "▶ tg-relay daemon (foreground, auto-restart)"
     echo "  log: $LOGFILE"
-    exec >>"$LOGFILE" 2>&1
+    exec >>"$LOGFILE" 2>&1 </dev/null
     run_foreground_loop
   fi
 
   echo "▶ tg-relay daemon (background)"
-  nohup "$0" start --foreground >>"$LOGFILE" 2>&1 &
+  nohup "$0" start --foreground >>"$LOGFILE" 2>&1 </dev/null &
   disown 2>/dev/null || true
 
   local waited=0

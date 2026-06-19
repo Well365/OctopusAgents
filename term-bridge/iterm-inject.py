@@ -88,6 +88,7 @@ def inject(
             capture_output=True,
             text=True,
             timeout=30,
+            stdin=subprocess.DEVNULL,
         )
         out = ((r.stdout or "") + (r.stderr or "")).strip()
         return r.returncode, out or ("ok" if r.returncode == 0 else "osascript failed")

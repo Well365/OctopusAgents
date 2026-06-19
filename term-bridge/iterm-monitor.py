@@ -84,6 +84,7 @@ def _capture_tail(lines: int) -> tuple[int, str]:
         capture_output=True,
         text=True,
         timeout=45,
+        stdin=subprocess.DEVNULL,  # daemon fd0 may be closed → child Python would crash
     )
     out = ((r.stdout or "") + (r.stderr or "")).strip()
     return r.returncode, out
@@ -169,6 +170,7 @@ def _send_iterm_screenshot() -> tuple[int, str]:
         text=True,
         timeout=120,
         env=os.environ.copy(),
+        stdin=subprocess.DEVNULL,  # daemon fd0 may be closed → child Python would crash
     )
     out = ((r.stdout or "") + (r.stderr or "")).strip()
     if r.returncode == 0:
@@ -188,7 +190,10 @@ def _run_send(env: dict, chat_id: int, text: str, parse_mode: str | None) -> tup
     if parse_mode:
         cmd += ["--parse-mode", parse_mode]
     cmd += ["--text", text]  # --text avoids leading '-' being parsed as a flag
-    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=60, env=env)
+    r = subprocess.run(
+        cmd, cwd=ROOT, capture_output=True, text=True, timeout=60, env=env,
+        stdin=subprocess.DEVNULL,  # daemon fd0 may be closed → child Python would crash
+    )
     out = ((r.stdout or "") + (r.stderr or "")).strip()
     return r.returncode, out
 

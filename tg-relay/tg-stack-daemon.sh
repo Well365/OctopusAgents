@@ -99,7 +99,7 @@ start_monitor() {
   fi
 
   echo "▶ iterm-monitor daemon (background)"
-  nohup python3 "$ITERM_MONITOR" >>"$ITERM_LOG" 2>&1 &
+  nohup python3 "$ITERM_MONITOR" >>"$ITERM_LOG" 2>&1 </dev/null &
   local mpid=$!
   disown 2>/dev/null || true
   echo "$mpid" >"$ITERM_PIDFILE"

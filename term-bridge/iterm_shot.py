@@ -56,6 +56,7 @@ def get_window_id(window: int | None, *, timeout: float = 15.0) -> int:
         capture_output=True,
         text=True,
         timeout=timeout,
+        stdin=subprocess.DEVNULL,
     )
     if r.returncode != 0:
         detail = (r.stderr or r.stdout or "osascript failed").strip()
@@ -75,7 +76,7 @@ def capture_window_png(
     out.parent.mkdir(parents=True, exist_ok=True)
     wid = get_window_id(window)
     cmd = build_screencapture_cmd(wid, str(out), no_shadow=no_shadow)
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     if r.returncode != 0:
         detail = (r.stderr or r.stdout or f"exit {r.returncode}").strip()
         raise RuntimeError(f"screencapture failed: {detail}")

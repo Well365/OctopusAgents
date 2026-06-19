@@ -32,7 +32,10 @@ def _load_env() -> None:
 
 def _run(cmd: list[str]) -> tuple[int, str]:
     try:
-        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
+        r = subprocess.run(
+            cmd, cwd=ROOT, capture_output=True, text=True, timeout=120,
+            stdin=subprocess.DEVNULL,  # daemon fd0 may be closed → child Python would crash
+        )
         return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return 1, str(e)
@@ -73,6 +76,7 @@ def _schedule_iterm_monitor_poll() -> None:
                 f"subprocess.run([sys.executable, {monitor!r}, '--once'])"
             ),
         ],
+        stdin=subprocess.DEVNULL,  # detached child Python needs a valid fd0
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

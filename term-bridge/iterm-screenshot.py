@@ -53,7 +53,10 @@ def _send_photo(path: Path, chat: str, caption: str, env: dict) -> tuple[int, st
         "--chat-id", chat,
         "--caption", caption,
     ]
-    r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120, env=env)
+    r = subprocess.run(
+        cmd, cwd=ROOT, capture_output=True, text=True, timeout=120, env=env,
+        stdin=subprocess.DEVNULL,
+    )
     out = ((r.stdout or "") + (r.stderr or "")).strip()
     return r.returncode, out
 

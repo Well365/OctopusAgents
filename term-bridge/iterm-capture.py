@@ -53,6 +53,7 @@ def capture_iterm(*, target: ItermTarget | None = None) -> tuple[int, str]:
             capture_output=True,
             text=True,
             timeout=30,
+            stdin=subprocess.DEVNULL,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return 1, str(e)
