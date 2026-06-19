@@ -161,7 +161,7 @@ def _text_fallback_seconds() -> float:
 
 def _auto_default_seconds() -> float:
     """Auto-press Enter on a stuck select-prompt after this long. Env
-    TG_ITERM_MONITOR_AUTO_DEFAULT (default 60, 0/off disables)."""
+    TG_ITERM_MONITOR_AUTO_DEFAULT (default 60, 0/off/false/no/empty disables)."""
     raw = os.environ.get("TG_ITERM_MONITOR_AUTO_DEFAULT", "60").strip()
     if raw.lower() in ("", "0", "false", "no", "off"):
         return 0.0
@@ -188,14 +188,13 @@ def _write_auto_default_mark(key: str) -> None:
     p.write_text(key, encoding="utf-8")
 
 
-def _inject_key(key: str) -> tuple[int, str]:
+def _inject_key(key: str, target) -> tuple[int, str]:
     cmd = [sys.executable, str(term_backend.inject_script()), "--key", key]
-    t = resolve_target()
-    if t.window is None:
+    if target.window is None:
         cmd.append("--front-window")
     else:
-        cmd.extend(["--window", str(t.window)])
-    cmd.extend(["--tab", str(t.tab)])
+        cmd.extend(["--window", str(target.window)])
+    cmd.extend(["--tab", str(target.tab)])
     r = subprocess.run(
         cmd, cwd=ROOT, capture_output=True, text=True, timeout=30,
         env=os.environ.copy(), stdin=subprocess.DEVNULL,
@@ -447,7 +446,7 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
                 stable_key=stable_key,
                 last_fired_key=_read_auto_default_mark(),
             ):
-                k_code, k_msg = _inject_key("enter")
+                k_code, k_msg = _inject_key("enter", target)
                 if k_code == 0:
                     _write_auto_default_mark(stable_key)
                     _send_tg(_auto_default_caption(), "plain")

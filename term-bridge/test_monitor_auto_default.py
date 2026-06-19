@@ -20,6 +20,16 @@ def test_auto_default_seconds_off(monkeypatch):
     assert mon._auto_default_seconds() == 0.0
 
 
+def test_auto_default_seconds_false(monkeypatch):
+    monkeypatch.setenv("TG_ITERM_MONITOR_AUTO_DEFAULT", "false")
+    assert mon._auto_default_seconds() == 0.0
+
+
+def test_auto_default_seconds_no(monkeypatch):
+    monkeypatch.setenv("TG_ITERM_MONITOR_AUTO_DEFAULT", "no")
+    assert mon._auto_default_seconds() == 0.0
+
+
 def test_auto_default_seconds_custom(monkeypatch):
     monkeypatch.setenv("TG_ITERM_MONITOR_AUTO_DEFAULT", "30")
     assert mon._auto_default_seconds() == 30.0
