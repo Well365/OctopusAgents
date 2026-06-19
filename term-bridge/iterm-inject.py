@@ -121,6 +121,7 @@ def inject(
 
 
 def inject_key(key: str, *, target: ItermTarget | None = None) -> tuple[int, str]:
+    """Execute _key_applescript via osascript; returns (returncode, message)."""
     if sys.platform != "darwin":
         return 1, "iTerm inject requires macOS"
     _load_env()
