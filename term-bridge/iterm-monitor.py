@@ -223,7 +223,12 @@ def _send_iterm_screenshot() -> tuple[int, str]:
         "iTerm · 1 分钟内无新输出",
     ).strip() or "iTerm"
     r = subprocess.run(
-        [sys.executable, str(term_backend.screenshot_script()), "--caption", cap],
+        [
+            sys.executable,
+            str(term_backend.screenshot_script()),
+            "--caption", cap,
+            "--dedup-state", str(_monitor_file("shot-fp")),
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -470,7 +475,7 @@ def main() -> int:
 
     if args.reset:
         from iterm_log_buffer import reset as reset_log_buffer
-        for kind in ("state", "last-sent", "last-sent-at", "screenshot-mark", "auto-default-mark"):
+        for kind in ("state", "last-sent", "last-sent-at", "screenshot-mark", "auto-default-mark", "shot-fp"):
             p = _monitor_file(kind)
             if p.is_file():
                 p.unlink()

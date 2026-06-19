@@ -33,6 +33,48 @@ def build_window_id_script(window: int | None, app: str = "iTerm") -> str:
     )
 
 
+def build_select_tab_script(window: int | None, tab: int, app: str = "iTerm") -> str:
+    """AppleScript that makes `tab` the front tab of the target window.
+
+    `screencapture -l <window-id>` renders the window's *front* tab, so to
+    capture a specific tab we select it first. Best-effort: wrapped in `try`
+    so a single-tab window or a read-only property never aborts the capture.
+    No `activate` — selecting a tab does not steal OS focus.
+    """
+    if window is None:
+        win_spec = "current window" if app == "iTerm" else "front window"
+    else:
+        win_spec = f"window {int(window)}"
+    if app == "iTerm":
+        return (
+            'tell application "iTerm"\n'
+            "    try\n"
+            f"        tell {win_spec}\n"
+            f"            select tab {int(tab)}\n"
+            "        end tell\n"
+            "    end try\n"
+            "end tell"
+        )
+    return (
+        'tell application "Terminal"\n'
+        "    try\n"
+        f"        set selected of tab {int(tab)} of {win_spec} to true\n"
+        "    end try\n"
+        "end tell"
+    )
+
+
+def select_tab(window: int | None, tab: int, *, app: str = "iTerm", timeout: float = 10.0) -> None:
+    """Best-effort: bring `tab` to the front of its window before capture."""
+    try:
+        subprocess.run(
+            ["osascript", "-e", build_select_tab_script(window, tab, app=app)],
+            capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        pass  # capture proceeds on whatever tab is front
+
+
 def parse_window_id(raw: str) -> int:
     """Validate osascript output is a positive integer window id."""
     value = (raw or "").strip()

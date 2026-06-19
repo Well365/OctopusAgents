@@ -15,8 +15,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "term-bridge"))
-from iterm_shot import capture_window_png  # noqa: E402
+from iterm_shot import capture_window_png, select_tab  # noqa: E402
 from iterm_target import resolve_target  # noqa: E402
+from screenshot_dedup import (  # noqa: E402
+    DEFAULT_THRESHOLD,
+    fingerprint,
+    is_duplicate,
+    read_fingerprint,
+    write_fingerprint,
+)
 
 
 def _load_env() -> None:
@@ -46,6 +53,18 @@ def _no_shadow() -> bool:
     return raw not in ("", "0", "false", "no", "off")
 
 
+def _similarity_threshold() -> float:
+    """Skip a screenshot when >= this fraction similar to the last sent one.
+    Env TG_ITERM_SCREENSHOT_SIMILARITY (default 0.95)."""
+    raw = os.environ.get("TG_ITERM_SCREENSHOT_SIMILARITY", "").strip()
+    if not raw:
+        return DEFAULT_THRESHOLD
+    try:
+        return min(1.0, max(0.0, float(raw)))
+    except ValueError:
+        return DEFAULT_THRESHOLD
+
+
 def _send_photo(path: Path, chat: str, caption: str, env: dict) -> tuple[int, str]:
     cmd = [
         "tg-notify", "send",
@@ -61,7 +80,7 @@ def _send_photo(path: Path, chat: str, caption: str, env: dict) -> tuple[int, st
     return r.returncode, out
 
 
-def capture_and_send(*, caption: str | None = None) -> tuple[int, str]:
+def capture_and_send(*, caption: str | None = None, dedup_state: str | None = None) -> tuple[int, str]:
     if sys.platform != "darwin":
         return 1, "iTerm screenshot requires macOS"
 
@@ -81,9 +100,20 @@ def capture_and_send(*, caption: str | None = None) -> tuple[int, str]:
     handle.close()
     path = Path(handle.name)
     try:
+        # Bring the target tab to the front of its window so we capture it,
+        # not whatever tab happens to be visible.
+        select_tab(target.window, target.tab, app="iTerm")
         capture_window_png(target.window, path, no_shadow=_no_shadow())
+        # Skip near-identical screenshots so an idle session doesn't spam Telegram.
+        fp = None
+        if dedup_state:
+            fp = fingerprint(path.read_bytes())
+            if is_duplicate(fp, read_fingerprint(dedup_state), threshold=_similarity_threshold()):
+                return 0, "similar screenshot (>= threshold), skipped"
         code, out = _send_photo(path, chat, cap, env)
         if code == 0:
+            if dedup_state and fp is not None:
+                write_fingerprint(dedup_state, fp)
             return 0, out or "screenshot sent"
         return code, out or "screenshot send failed"
     except (RuntimeError, subprocess.TimeoutExpired) as exc:
@@ -98,8 +128,9 @@ def capture_and_send(*, caption: str | None = None) -> tuple[int, str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="iTerm window screenshot -> Telegram")
     parser.add_argument("--caption", help="Telegram photo caption")
+    parser.add_argument("--dedup-state", help="File storing last-sent screenshot fingerprint; skip if similar")
     args = parser.parse_args()
-    code, msg = capture_and_send(caption=args.caption)
+    code, msg = capture_and_send(caption=args.caption, dedup_state=args.dedup_state)
     print(msg)
     return 0 if code == 0 else 1
 
