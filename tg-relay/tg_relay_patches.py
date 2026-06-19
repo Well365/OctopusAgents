@@ -10,6 +10,7 @@ from types import ModuleType
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "term-bridge"))
 
+import term_backend
 from iterm_route import format_tabs_message, parse_routed_message
 from iterm_target import apply_target_env, resolve_target
 from tg_format_config import VALID as _FORMATS, get_format, set_format
@@ -17,7 +18,7 @@ from tg_format_config import VALID as _FORMATS, get_format, set_format
 
 def _inject_iterm(text: str, target=None) -> tuple[int, str]:
     t = target or resolve_target()
-    cmd = [sys.executable, str(ROOT / "term-bridge" / "iterm-inject.py")]
+    cmd = [sys.executable, str(term_backend.inject_script())]
     if t.window is None:
         cmd.append("--front-window")
     else:

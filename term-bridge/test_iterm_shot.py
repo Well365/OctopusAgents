@@ -32,6 +32,20 @@ def test_script_for_front_window_uses_current_window():
     assert "window 1" not in script
 
 
+def test_script_defaults_to_iterm_app():
+    assert 'tell application "iTerm"' in build_window_id_script(1)
+
+
+def test_script_targets_terminal_app_when_requested():
+    script = build_window_id_script(1, app="Terminal")
+    assert 'tell application "Terminal"' in script
+    assert "window 1" in script
+
+
+def test_script_guards_not_running_to_avoid_autolaunch():
+    assert "is not running" in build_window_id_script(1, app="Terminal")
+
+
 # ── parse_window_id ──
 
 def test_parse_plain_id():

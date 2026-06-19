@@ -12,18 +12,21 @@ import subprocess
 from pathlib import Path
 
 
-def build_window_id_script(window: int | None) -> str:
-    """AppleScript that returns the CGWindowID of the target iTerm window.
+def build_window_id_script(window: int | None, app: str = "iTerm") -> str:
+    """AppleScript that returns the CGWindowID of the target window.
 
     `window` None → frontmost (current) window; otherwise the 1-based index.
+    `app` is the scripting name ("iTerm" or "Terminal"); both expose `id of
+    window` as the CGWindowID that `screencapture -l` expects.
     """
     if window is None:
         win_spec = "current window"
     else:
         win_spec = f"window {int(window)}"
     return (
-        'tell application "iTerm"\n'
-        '    if (count of windows) is 0 then error "No iTerm window open"\n'
+        f'if application "{app}" is not running then error "No {app} running"\n'
+        f'tell application "{app}"\n'
+        f'    if (count of windows) is 0 then error "No {app} window open"\n'
         f"    return id of {win_spec}\n"
         "end tell"
     )
@@ -49,10 +52,10 @@ def build_screencapture_cmd(window_id: int, path: str, no_shadow: bool = False) 
     return cmd
 
 
-def get_window_id(window: int | None, *, timeout: float = 15.0) -> int:
-    """Resolve the target iTerm window's CGWindowID without activating it."""
+def get_window_id(window: int | None, *, app: str = "iTerm", timeout: float = 15.0) -> int:
+    """Resolve the target window's CGWindowID without activating it."""
     r = subprocess.run(
-        ["osascript", "-e", build_window_id_script(window)],
+        ["osascript", "-e", build_window_id_script(window, app=app)],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -60,7 +63,7 @@ def get_window_id(window: int | None, *, timeout: float = 15.0) -> int:
     )
     if r.returncode != 0:
         detail = (r.stderr or r.stdout or "osascript failed").strip()
-        raise RuntimeError(f"could not read iTerm window id: {detail}")
+        raise RuntimeError(f"could not read {app} window id: {detail}")
     return parse_window_id(r.stdout)
 
 
@@ -68,13 +71,14 @@ def capture_window_png(
     window: int | None,
     path: str | Path,
     *,
+    app: str = "iTerm",
     no_shadow: bool = False,
     timeout: float = 30.0,
 ) -> Path:
-    """Capture the target iTerm window to `path` (no activate). Returns the path."""
+    """Capture the target window to `path` (no activate). Returns the path."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    wid = get_window_id(window)
+    wid = get_window_id(window, app=app)
     cmd = build_screencapture_cmd(wid, str(out), no_shadow=no_shadow)
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     if r.returncode != 0:

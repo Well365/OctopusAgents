@@ -10,10 +10,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ITERM_SHOT = ROOT / "term-bridge" / "iterm-screenshot.py"
-CAPTURE = ROOT / "term-bridge" / "iterm-capture.py"
 
 sys.path.insert(0, str(ROOT / "term-bridge"))
+import term_backend  # noqa: E402
 from iterm_extract import (  # noqa: E402
     extract_latest_reply,
     is_reply_complete,
@@ -77,7 +76,7 @@ def _resolve_monitor_target() -> tuple[str | None, int | None, str | None]:
 
 
 def _capture_tail(lines: int) -> tuple[int, str]:
-    cmd = [sys.executable, str(CAPTURE)]
+    cmd = [sys.executable, str(term_backend.capture_script())]
     if lines > 0:
         cmd.extend(["--tail", str(lines)])
     r = subprocess.run(
@@ -180,7 +179,7 @@ def _send_iterm_screenshot() -> tuple[int, str]:
         "iTerm · 1 分钟内无新输出",
     ).strip() or "iTerm"
     r = subprocess.run(
-        [sys.executable, str(ITERM_SHOT), "--caption", cap],
+        [sys.executable, str(term_backend.screenshot_script()), "--caption", cap],
         cwd=ROOT,
         capture_output=True,
         text=True,
