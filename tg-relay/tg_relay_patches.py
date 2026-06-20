@@ -73,6 +73,7 @@ def _schedule_iterm_monitor_poll(target=None) -> None:
     monitor = str(ROOT / "term-bridge" / "iterm-monitor.py")
     t = target or resolve_target()
     env = apply_target_env(t)
+    env["ITERM_MONITOR_SUFFIX"] = t.log_suffix()
     env_str = repr(env)
     subprocess.Popen(
         [

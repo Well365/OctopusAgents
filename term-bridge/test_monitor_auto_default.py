@@ -50,3 +50,30 @@ def test_reload_cursors_on_change_detects_switch():
     spec.loader.exec_module(mod)
     assert mod.reload_cursors_on_change("w1-t1", "w1-t3") is True
     assert mod.reload_cursors_on_change("w1-t3", "w1-t3") is False
+
+
+def _load_monitor_mod():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "iterm_monitor_mod_fix", Path(__file__).resolve().parent / "iterm-monitor.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_monitor_file_prefers_explicit_suffix_env(monkeypatch):
+    from iterm_target import ItermTarget
+    mod = _load_monitor_mod()
+    monkeypatch.setenv("ITERM_MONITOR_SUFFIX", "w1-t2")
+    monkeypatch.setattr(mod, "current_target", lambda: ItermTarget(window=1, tab=9))
+    assert mod._monitor_file("last-sent").name == "iterm-monitor-w1-t2.last-sent"
+
+
+def test_monitor_file_falls_back_to_current_target_without_suffix(monkeypatch):
+    from iterm_target import ItermTarget
+    mod = _load_monitor_mod()
+    monkeypatch.delenv("ITERM_MONITOR_SUFFIX", raising=False)
+    monkeypatch.setattr(mod, "current_target", lambda: ItermTarget(window=1, tab=9))
+    assert mod._monitor_file("state").name == "iterm-monitor-w1-t9.state"

@@ -28,7 +28,11 @@ from tg_format_config import get_format  # noqa: E402
 
 
 def _monitor_file(kind: str) -> Path:
-    return ROOT / "inbox" / f"iterm-monitor-{current_target().log_suffix()}.{kind}"
+    # The per-message `--once` poll pins its target via ITERM_MONITOR_SUFFIX so its
+    # dedup cursors share the namespace of the tab it captured. The long-running
+    # daemon sets no such env and follows the live /tab default via current_target().
+    suffix = os.environ.get("ITERM_MONITOR_SUFFIX", "").strip() or current_target().log_suffix()
+    return ROOT / "inbox" / f"iterm-monitor-{suffix}.{kind}"
 
 
 def reload_cursors_on_change(old_label: str, new_label: str) -> bool:
