@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "term-bridge"))
 from chat_allowlist import is_allowed, resolve_allowlist  # noqa: E402
 from tg_menu import MENU_COMMANDS, dispatch_callback, menu_for_command, tab_submenu  # noqa: E402
 from iterm_route import list_tabs  # noqa: E402
+from term_backend import screenshot_script  # noqa: E402
 
 INBOX_DIR = ROOT / "inbox"
 INBOX_FILE = INBOX_DIR / "pending.txt"
@@ -130,7 +131,7 @@ def _handle_command(text: str) -> str:
         return (
             "mobile-agent bot\n\n"
             "/check — environment check\n"
-            "/shot android|ios — screenshot to Telegram\n"
+            "/shot android|ios|mac|term — screenshot to Telegram\n"
             "/tap X Y [android|ios]\n"
             "/swipe X1 Y1 X2 Y2 [android|ios]\n"
             "/devices — list devices\n\n"
@@ -151,11 +152,17 @@ def _handle_command(text: str) -> str:
 
     if cmd == "/shot" and args:
         platform = args[0].lower()
-        script = "shot-android.sh" if platform == "android" else "shot-ios.sh" if platform == "ios" else ""
-        if not script:
-            return "usage: /shot android|ios"
-        code, out = _run([str(ROOT / "mob-compose" / "scripts" / script), "-c", f"TG /shot {platform}"])
-        return out or f"{platform} screenshot sent" if code == 0 else (out or f"failed ({code})")
+        if platform in ("android", "ios"):
+            script = "shot-android.sh" if platform == "android" else "shot-ios.sh"
+            code, out = _run([str(ROOT / "mob-compose" / "scripts" / script), "-c", f"TG /shot {platform}"])
+            return out or f"{platform} screenshot sent" if code == 0 else (out or f"failed ({code})")
+        if platform == "mac":
+            code, out = _run([sys.executable, str(ROOT / "term-bridge" / "mac-screenshot.py"), "--caption", "TG /shot mac"])
+            return out or "mac screenshot sent" if code == 0 else (out or f"failed ({code})")
+        if platform in ("term", "terminal", "iterm"):
+            code, out = _run([sys.executable, str(screenshot_script()), "--caption", "TG /shot term"])
+            return out or "terminal screenshot sent" if code == 0 else (out or f"failed ({code})")
+        return "usage: /shot android|ios|mac|term"
 
     if cmd == "/tap":
         parsed = _parse_tap(args)

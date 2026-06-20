@@ -15,6 +15,9 @@ def test_submenus_for_parents():
     assert ("codex", "new:codex") in m.SUBMENUS["/new"]
     assert ("html", "fmt:html") in m.SUBMENUS["/format"]
     assert ("android", "shot:android") in m.SUBMENUS["/shot"]
+    assert ("ios", "shot:ios") in m.SUBMENUS["/shot"]
+    assert ("mac屏幕", "shot:mac") in m.SUBMENUS["/shot"]
+    assert ("终端", "shot:term") in m.SUBMENUS["/shot"]
 
 
 def test_menu_for_command_bare_parent_returns_buttons():
@@ -39,6 +42,8 @@ def test_callback_to_command():
     assert m.callback_to_command("new", "claude") == "/new claude"
     assert m.callback_to_command("fmt", "html") == "/format html"
     assert m.callback_to_command("shot", "android") == "/shot android"
+    assert m.callback_to_command("shot", "mac") == "/shot mac"
+    assert m.callback_to_command("shot", "term") == "/shot term"
     assert m.callback_to_command("bogus", "x") is None
 
 

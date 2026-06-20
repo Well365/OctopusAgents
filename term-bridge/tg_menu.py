@@ -12,7 +12,7 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("new", "新 tab 启动 agent 会话"),
     ("tabs", "列出终端标签"),
     ("tab", "选择转发目标 tab"),
-    ("shot", "截图当前屏幕"),
+    ("shot", "截图：设备 / Mac 屏幕 / 终端"),
     ("format", "设置回传格式"),
     ("devices", "列出设备"),
     ("check", "环境检查"),
@@ -32,7 +32,12 @@ SUBMENUS: dict[str, list[tuple[str, str]]] = {
         ("plain", "fmt:plain"),
         ("screenshot", "fmt:screenshot"),
     ],
-    "/shot": [("android", "shot:android"), ("ios", "shot:ios")],
+    "/shot": [
+        ("android", "shot:android"),
+        ("ios", "shot:ios"),
+        ("mac屏幕", "shot:mac"),
+        ("终端", "shot:term"),
+    ],
     "/model": [
         ("opus", "model:opus"),
         ("sonnet", "model:sonnet"),
