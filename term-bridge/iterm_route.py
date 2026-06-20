@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "term-bridge"))
 
 from iterm_tabs import list_targets  # noqa: E402
 from iterm_target import ItermTarget, resolve_target  # noqa: E402
+from target_default import read_default  # noqa: E402
 
 # [tab:2] [t2] [mobile-agent] @2: @fz: #2
 _PREFIX_PATTERNS: list[tuple[re.Pattern[str], str]] = [
@@ -117,6 +118,18 @@ def _find_by_key(tabs: list[TabInfo], key: str) -> TabInfo | None:
     return None
 
 
+def _sticky_default() -> ItermTarget:
+    """Persistent /tab default if set and still open, else the .env default."""
+    d = read_default()
+    if d is None:
+        return resolve_target()
+    if d.window is not None:
+        code, tabs = list_tabs()
+        if code == 0 and tabs and not any(t.window == d.window and t.tab == d.tab for t in tabs):
+            return resolve_target()
+    return d
+
+
 def parse_routed_message(text: str) -> tuple[ItermTarget, str, TabInfo | None]:
     """
     Parse routing prefix from message.
@@ -124,7 +137,7 @@ def parse_routed_message(text: str) -> tuple[ItermTarget, str, TabInfo | None]:
     Falls back to resolve_target() from .env when no prefix.
     """
     body = text.strip()
-    default = resolve_target()
+    default = _sticky_default()
 
     for pat, kind in _PREFIX_PATTERNS:
         m = pat.match(body)
