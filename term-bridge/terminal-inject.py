@@ -55,6 +55,8 @@ def inject(
     text: str,
     *,
     submit_enter: bool = True,
+    enter_twice: bool = False,
+    clear_line: bool = False,
     target: ItermTarget | None = None,
 ) -> tuple[int, str]:
     if sys.platform != "darwin":
@@ -65,7 +67,10 @@ def inject(
 
     _load_env()
     t = target or resolve_target()
-    script = build_inject_script(window=t.window, tab=t.tab, submit_enter=submit_enter)
+    script = build_inject_script(
+        window=t.window, tab=t.tab, submit_enter=submit_enter,
+        enter_twice=enter_twice, clear_line=clear_line,
+    )
 
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt") as f:
         f.write(text)
@@ -120,6 +125,8 @@ def main() -> int:
     parser.add_argument("--tab", type=int, help="Tab index (1-based)")
     parser.add_argument("--session", type=int, help="Ignored for Terminal (no split panes)")
     parser.add_argument("--no-enter", action="store_true", help="Paste without pressing Return")
+    parser.add_argument("--enter-twice", action="store_true", help="Press Return twice (slash commands in TUIs)")
+    parser.add_argument("--clear-line", action="store_true", help="Ctrl-U before paste (wipe leftover input)")
     parser.add_argument("--key", choices=("enter", "esc"), help="Press a single key instead of typing text")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -143,7 +150,10 @@ def main() -> int:
         print(f"would inject {len(text)} chars to Terminal ({target.label()})")
         return 0
 
-    code, out = inject(text, submit_enter=not args.no_enter, target=target)
+    code, out = inject(
+        text, submit_enter=not args.no_enter, enter_twice=args.enter_twice,
+        clear_line=args.clear_line, target=target,
+    )
     if code != 0:
         print(out, file=sys.stderr)
         return code

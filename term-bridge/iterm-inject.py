@@ -28,13 +28,21 @@ on run
         set theText to text 1 thru -2 of theText
     end if
     set submitEnter to system attribute "ITERM_INJECT_SUBMIT"
+    set enterTwice to system attribute "ITERM_INJECT_ENTER_TWICE"
+    set clearLine to system attribute "ITERM_INJECT_CLEAR"
 """
     + applescript_session_block()
     + r"""
+                    if clearLine is "1" then
+                        write text (character id 21) without newline
+                    end if
                     if submitEnter is "0" then
                         write text theText without newline
                     else
                         write text theText
+                        if enterTwice is "1" then
+                            write text ""
+                        end if
                     end if
 """
     + applescript_session_close(extra_close=0)
@@ -84,6 +92,8 @@ def inject(
     text: str,
     *,
     submit_enter: bool = True,
+    enter_twice: bool = False,
+    clear_line: bool = False,
     target: ItermTarget | None = None,
 ) -> tuple[int, str]:
     if sys.platform != "darwin":
@@ -103,6 +113,8 @@ def inject(
         env = apply_target_env(t)
         env["ITERM_INJECT_FILE"] = path
         env["ITERM_INJECT_SUBMIT"] = "0" if not submit_enter else "1"
+        env["ITERM_INJECT_ENTER_TWICE"] = "1" if enter_twice else "0"
+        env["ITERM_INJECT_CLEAR"] = "1" if clear_line else "0"
         r = subprocess.run(
             ["osascript", "-e", APPLESCRIPT],
             env=env,
@@ -143,6 +155,8 @@ def main() -> int:
     parser.add_argument("--tab", type=int, help="Tab index (1-based)")
     parser.add_argument("--session", type=int, help="Split pane index (1-based); default active pane")
     parser.add_argument("--no-enter", action="store_true", help="Type without pressing Enter")
+    parser.add_argument("--enter-twice", action="store_true", help="Send Return twice (slash commands in TUIs)")
+    parser.add_argument("--clear-line", action="store_true", help="Ctrl-U before write (wipe leftover input)")
     parser.add_argument("--key", choices=("enter", "esc"), help="Press a single key instead of typing text")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -166,7 +180,10 @@ def main() -> int:
         print(f"would inject {len(text)} chars to iTerm ({target.label()})")
         return 0
 
-    code, out = inject(text, submit_enter=not args.no_enter, target=target)
+    code, out = inject(
+        text, submit_enter=not args.no_enter, enter_twice=args.enter_twice,
+        clear_line=args.clear_line, target=target,
+    )
     if code != 0:
         print(out, file=sys.stderr)
         return code

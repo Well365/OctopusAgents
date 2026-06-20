@@ -47,11 +47,33 @@ def build_key_script(*, window: int | None, tab: int, key: str) -> str:
     )
 
 
-def build_inject_script(*, window: int | None, tab: int, submit_enter: bool) -> str:
-    """Full `on run` AppleScript for one clipboard-paste injection."""
+def build_inject_script(
+    *,
+    window: int | None,
+    tab: int,
+    submit_enter: bool,
+    enter_twice: bool = False,
+    clear_line: bool = False,
+) -> str:
+    """Full `on run` AppleScript for one clipboard-paste injection.
+
+    enter_twice: send Return a second time. Needed for slash commands in TUIs
+    (e.g. Claude Code), where the first Return is swallowed by the slash-command
+    autocomplete menu instead of submitting the line.
+    clear_line: press Ctrl-U before pasting to wipe any leftover/unsubmitted
+    input, so a prior command never concatenates onto this one (e.g. the
+    "/model sonnet/model opus" run-together bug).
+    """
     win = _window_ref(window)
+    # Wipe the input line first so a stale, unsubmitted command can't concatenate.
+    clear = '        keystroke "u" using control down\n        delay 0.1\n' if clear_line else ""
     # Paste is async; let it settle into the input buffer before Return submits.
-    submit = "        delay 0.2\n        keystroke return\n" if submit_enter else ""
+    if submit_enter:
+        submit = "        delay 0.2\n        keystroke return\n"
+        if enter_twice:
+            submit += "        delay 0.25\n        keystroke return\n"
+    else:
+        submit = ""
     # Best-effort focus of the requested window/tab; wrapped so a read-only
     # property or single-window setup never aborts the paste.
     focus_window = (
@@ -90,6 +112,7 @@ def build_inject_script(*, window: int | None, tab: int, submit_enter: bool) -> 
         '            if frontmost of process "Terminal" then exit repeat\n'
         "            delay 0.05\n"
         "        end repeat\n"
+        f"{clear}"
         '        keystroke "v" using command down\n'
         f"{submit}"
         "    end tell\n"

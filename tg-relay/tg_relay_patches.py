@@ -18,8 +18,15 @@ from tg_format_config import VALID as _FORMATS, get_format, set_format
 from tg_new_command import SpawnResult, retarget_env
 
 
-def _inject_iterm(text: str, target=None) -> tuple[int, str]:
+def _is_slash_command(text: str) -> bool:
+    """Slash commands need Return twice — the TUI's autocomplete menu eats the first."""
+    return text.lstrip().startswith("/")
+
+
+def _inject_iterm(text: str, target=None, enter_twice: bool | None = None) -> tuple[int, str]:
     t = target or resolve_target()
+    if enter_twice is None:
+        enter_twice = _is_slash_command(text)
     cmd = [sys.executable, str(term_backend.inject_script())]
     if t.window is None:
         cmd.append("--front-window")
@@ -28,6 +35,11 @@ def _inject_iterm(text: str, target=None) -> tuple[int, str]:
     cmd.extend(["--tab", str(t.tab)])
     if t.session is not None:
         cmd.extend(["--session", str(t.session)])
+    if enter_twice:
+        # slash commands: clear any leftover input first (no concatenation),
+        # and press Return twice (autocomplete eats the first).
+        cmd.append("--enter-twice")
+        cmd.append("--clear-line")
     cmd.append(text)
     try:
         r = subprocess.run(
@@ -88,6 +100,42 @@ def _schedule_iterm_monitor_poll(target=None) -> None:
         ],
         env=env,
         stdin=subprocess.DEVNULL,  # detached child Python needs a valid fd0
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def _schedule_confirm_enter(target=None, delay: float | None = None) -> None:
+    """Press Enter once after a short delay to accept a confirmation dialog.
+
+    Some slash commands (notably /model) pop a "Switch model? 1.Yes 2.No" prompt
+    with Yes highlighted; the in-line double-Return fires before the dialog renders,
+    so this delayed Enter lands on the dialog and accepts the default.
+    Delay via TG_MODEL_CONFIRM_DELAY (seconds, default 1.3).
+    """
+    if delay is None:
+        try:
+            delay = float(os.environ.get("TG_MODEL_CONFIRM_DELAY", "1.3"))
+        except ValueError:
+            delay = 1.3
+    t = target or resolve_target()
+    env = apply_target_env(t)
+    cmd = [str(term_backend.inject_script())]
+    if t.window is None:
+        cmd.append("--front-window")
+    else:
+        cmd.extend(["--window", str(t.window)])
+    cmd.extend(["--tab", str(t.tab), "--key", "enter"])
+    subprocess.Popen(
+        [
+            sys.executable, "-c",
+            "import time, subprocess, sys; "
+            f"time.sleep({float(delay)}); "
+            f"subprocess.run([sys.executable] + {cmd!r}, env={env!r}, stdin=subprocess.DEVNULL)",
+        ],
+        env=env,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -212,6 +260,9 @@ def apply(mod: ModuleType) -> None:
                 code, out = _inject_key(action.payload)
             else:
                 code, out = _inject_iterm(action.payload, target=resolve_target())
+                # /model pops a "Switch model?" confirmation — auto-accept default (Yes)
+                if code == 0 and cmd == "/model":
+                    _schedule_confirm_enter(target=resolve_target())
             if code == 0:
                 return f"✓ 已发送 {cmd} → {action.payload}"
             return f"会话控制失败:\n{out[:800]}"
