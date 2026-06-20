@@ -337,6 +337,41 @@ def main() -> int:
             reply = f"⚠️ 消息过长，已截断到 {len(text)} 字后注入\n{reply}"
         await update.message.reply_text(reply[:4000])
 
+    async def on_media(update: Update, context) -> None:
+        # Photo/document → save under inbox/attachments/ → inject the path so the
+        # agent can read it. Same auth + rate-limit gate as text.
+        msg = update.message
+        if not msg:
+            return
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if not is_allowed(chat_id, allowed):
+            print(f"ignored media from unauthorized chat {chat_id}", file=sys.stderr)
+            return
+        if chat_id is not None and not limiter.allow(chat_id, time.monotonic()):
+            print(f"rate-limited chat {chat_id}", file=sys.stderr)
+            return
+        chat_id = chat_id or 0
+        try:
+            from attachments import attachment_dir, dest_path, inject_text
+
+            attachment_dir().mkdir(parents=True, exist_ok=True)
+            if msg.photo:
+                ph = msg.photo[-1]  # largest size
+                tg_file = await context.bot.get_file(ph.file_id)
+                dest = dest_path(ph.file_unique_id, ".jpg")
+            elif msg.document:
+                doc = msg.document
+                tg_file = await context.bot.get_file(doc.file_id)
+                ext = Path(doc.file_name or "").suffix or ".bin"
+                dest = dest_path(doc.file_unique_id, ext)
+            else:
+                return
+            await tg_file.download_to_drive(str(dest))
+            reply = _handle_natural_language(chat_id, inject_text(str(dest), msg.caption or ""))
+            await msg.reply_text(reply[:4000])
+        except Exception as e:  # never crash the bot on a bad attachment
+            await msg.reply_text(f"附件处理失败: {e}")
+
     async def on_callback(update: Update, context) -> None:
         q = update.callback_query
         if not q:
@@ -370,6 +405,7 @@ def main() -> int:
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     app.add_handler(MessageHandler(filters.COMMAND, on_message))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, on_media))
     print(f"mobile-agent tg-relay listening (root={ROOT})")
     try:
         app.run_polling(allowed_updates=["message", "callback_query"])
