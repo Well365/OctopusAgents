@@ -261,6 +261,10 @@ def _output_format() -> str:
 
 
 def _run_send(env: dict, chat_id: int, text: str, parse_mode: str | None) -> tuple[int, str]:
+    # subprocess args cannot contain NUL — terminal capture occasionally yields one
+    # (e.g. partial escape sequences), which would crash fork_exec with
+    # "ValueError: embedded null byte". Strip it defensively.
+    text = text.replace("\x00", "")
     cmd = ["tg-notify", "send", "--chat-id", str(chat_id)]
     if parse_mode:
         cmd += ["--parse-mode", parse_mode]
