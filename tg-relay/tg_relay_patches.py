@@ -261,6 +261,14 @@ def apply(mod: ModuleType) -> None:
             return resolve_tab_command(
                 parts[1:], list_tabs, write_default, clear_default
             )
+        if cmd == "/p":
+            from quick_prompts import load, save_prompt, delete_prompt, resolve_p_command
+            reply, inject_text = resolve_p_command(
+                parts[1:], load(), save_prompt, delete_prompt
+            )
+            if inject_text is not None:
+                return handle_natural_language(0, inject_text)
+            return reply
         if cmd in ("/stop", "/interrupt", "/reset", "/compact", "/model", "/think"):
             from tg_session_control import resolve_session_command, session_usage
             arg = parts[1] if len(parts) > 1 else ""

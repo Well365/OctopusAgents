@@ -22,6 +22,7 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("compact", "压缩会话上下文"),
     ("model", "查看或切换模型"),
     ("think", "设置思考强度"),
+    ("p", "快捷提示库（/p 名字 注入）"),
     ("help", "显示可用命令"),
 ]
 
