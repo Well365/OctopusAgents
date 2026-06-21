@@ -26,6 +26,48 @@ from screenshot_dedup import (  # noqa: E402
 )
 
 
+# User-facing hint (中文) for a missing macOS Screen Recording grant.
+SCREEN_RECORDING_HINT: str = (
+    "需要 屏幕录制 权限：系统设置 → 隐私与安全性 → 屏幕录制"
+)
+
+# Lowercased fragments that `screencapture`/CGWindow emit when Screen Recording
+# is denied (and Apple error numbers for the same TCC failure). Conservative so
+# a transient capture error is not misreported as a permission problem.
+_SCREEN_DENIED_PATTERNS: tuple[str, ...] = (
+    "screen recording",
+    "screen capture",
+    "screencapture: cannot run",
+    "could not create image",
+    "not authorized to capture",
+    "not entitled",
+    "tccd",
+)
+_SCREEN_DENIED_CODES: tuple[str, ...] = (
+    "-25201",  # screen capture not authorized
+    "kcgerrorcannotcomplete",
+)
+
+
+def is_screen_recording_denied(text: str) -> bool:
+    """True when *text* indicates the macOS Screen Recording grant is missing."""
+    if not text:
+        return False
+    low = text.lower()
+    if any(p in low for p in _SCREEN_DENIED_PATTERNS):
+        return True
+    return any(code in low for code in _SCREEN_DENIED_CODES)
+
+
+def with_screen_recording_hint(text: str) -> str:
+    """Append :data:`SCREEN_RECORDING_HINT` on a denial; idempotent and safe."""
+    if not is_screen_recording_denied(text):
+        return text
+    if SCREEN_RECORDING_HINT in text:
+        return text
+    return f"{text}\n{SCREEN_RECORDING_HINT}".strip()
+
+
 def _load_env() -> None:
     env_path = ROOT / ".env"
     if os.environ.get("TGKIT_ENV_FILE"):
@@ -115,9 +157,12 @@ def capture_and_send(*, caption: str | None = None, dedup_state: str | None = No
             if dedup_state and fp is not None:
                 write_fingerprint(dedup_state, fp)
             return 0, out or "screenshot sent"
-        return code, out or "screenshot send failed"
+        return code, with_screen_recording_hint(out or "screenshot send failed")
     except (RuntimeError, subprocess.TimeoutExpired) as exc:
-        return 1, str(exc)
+        # A missing Screen Recording grant surfaces here as a screencapture
+        # RuntimeError — append a clear, actionable hint so the failure is not
+        # silent (the monitor's double-failure alert relays this reason).
+        return 1, with_screen_recording_hint(str(exc))
     finally:
         try:
             path.unlink()

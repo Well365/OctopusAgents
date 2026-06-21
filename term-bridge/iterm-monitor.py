@@ -8,6 +8,7 @@ conflicts with tg-relay (the sole updates consumer) over the shared bot token.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -51,6 +52,63 @@ def reload_cursors_on_change(old_label: str, new_label: str) -> bool:
     """True when the resolved target changed since last poll (cursors must reload)."""
     return old_label != new_label
 
+
+# --- Pure, unit-testable helpers ------------------------------------------
+
+# Default bounded tail (lines). 0 (explicitly set) still means "all"; this
+# sane cap stops both the every-5s rescan of the whole buffer AND a stale
+# "Crunched for Ns" marker high in the scrollback keeping is_reply_complete()
+# permanently True. The bounded window already mitigates the stale-marker case
+# (the old marker scrolls out of a 400-line tail well before it would mislead
+# completion detection), so completion scoping is left to the tail bound.
+_DEFAULT_TAIL_LINES = 400
+
+# Textual fragments (AppleScript / backend errors) that mean the target
+# window/tab/session no longer exists or the app is gone. Matched case-folded.
+_TARGET_LOST_PATTERNS: tuple[str, ...] = (
+    "window not found",
+    "tab not found",
+    "no iterm window open",
+    "no terminal window open",
+    "no iterm running",
+    "no terminal running",
+    "invalid window id",
+    "session not found",
+)
+
+# Apple error numbers raised when an object index/id can't be resolved.
+_TARGET_LOST_CODES: tuple[str, ...] = (
+    "-1719",  # errAENoSuchObject: invalid index / object not found
+    "-1728",  # errAENoSuchObject (can't get object)
+)
+
+
+def is_target_lost_error(text: str) -> bool:
+    """True when *text* indicates the target window/tab/session is gone.
+
+    Conservative: only fires on the known "missing object" AppleScript errors
+    so a transient capture hiccup is not misread as the tab being closed.
+    """
+    if not text:
+        return False
+    low = text.lower()
+    if any(p in low for p in _TARGET_LOST_PATTERNS):
+        return True
+    return any(code in text for code in _TARGET_LOST_CODES)
+
+
+def should_alert_once(*, condition: bool, already_marked: bool) -> bool:
+    """One-shot alert decision for an outage episode.
+
+    Fire only when the *condition* holds and we have not already alerted for the
+    current episode (the caller sets the mark on True, clears it on recovery).
+    """
+    return condition and not already_marked
+
+
+def sha1_token(text: str) -> str:
+    """Short, stable equality token for a (possibly large) capture string."""
+    return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()
 
 
 def _load_env() -> None:
@@ -114,6 +172,8 @@ def _capture_tail(lines: int) -> tuple[int, str]:
 
 
 def _read_state() -> str:
+    # Stores a short sha1 token of the last capture (used only for change
+    # detection equality, never parsed/displayed) so the mark stays tiny.
     p = _monitor_file("state")
     if p.is_file():
         return p.read_text(encoding="utf-8")
@@ -123,7 +183,7 @@ def _read_state() -> str:
 def _write_state(text: str) -> None:
     p = _monitor_file("state")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+    p.write_text(sha1_token(text), encoding="utf-8")
 
 
 def _read_last_sent() -> str:
@@ -200,6 +260,8 @@ def _auto_default_caption() -> str:
 
 
 def _read_auto_default_mark() -> str:
+    # Stores a short sha1 token of the fired stable_key (equality-only, never
+    # parsed/displayed) so the mark cannot grow to the size of a full capture.
     p = _monitor_file("auto-default-mark")
     return p.read_text(encoding="utf-8") if p.is_file() else ""
 
@@ -207,7 +269,28 @@ def _read_auto_default_mark() -> str:
 def _write_auto_default_mark(key: str) -> None:
     p = _monitor_file("auto-default-mark")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(key, encoding="utf-8")
+    p.write_text(sha1_token(key), encoding="utf-8")
+
+
+def _mark_is_set(kind: str) -> bool:
+    """True when an episode mark file exists with a truthy value."""
+    p = _monitor_file(kind)
+    if not p.is_file():
+        return False
+    try:
+        return bool(p.read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
+
+
+def _set_mark(kind: str, value: str = "1") -> None:
+    """Write (or clear, with "") an episode mark; never raises out of the loop."""
+    try:
+        p = _monitor_file(kind)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(value, encoding="utf-8")
+    except OSError as exc:
+        print(f"iterm-monitor: could not write mark {kind}: {exc}", flush=True)
 
 
 def _read_prompt_alert_mark() -> str:
@@ -344,6 +427,83 @@ def _send_tg_buttons(text: str, buttons: list[list[str]]) -> tuple[int, str]:
     return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
 
 
+_TARGET_LOST_ALERT = "⚠️ 目标终端已关闭或不可达，发送 /tab 重新选择目标"
+
+
+def _send_owner_alert(text: str) -> bool:
+    """Best-effort one-line alert to the owner chat.
+
+    Returns True on success. Never raises and never retries: if even sending the
+    alert fails, it is printed locally so the loop can never retry-storm on it.
+    """
+    try:
+        code, msg = _send_tg(text, "plain")
+    except Exception as exc:  # noqa: BLE001 — loop must never die on a probe
+        print(f"iterm-monitor: alert send crashed: {exc}", flush=True)
+        return False
+    if code != 0:
+        print(f"iterm-monitor: alert send failed: {msg}", flush=True)
+        return False
+    return True
+
+
+def _alert_target_lost() -> None:
+    """Fire the target-lost alert at most once per outage episode."""
+    if not should_alert_once(condition=True, already_marked=_mark_is_set("target-lost-mark")):
+        return
+    if _send_owner_alert(_TARGET_LOST_ALERT):
+        _set_mark("target-lost-mark")
+    # On a failed send we leave the mark unset so the next outage poll can retry
+    # the one alert; _send_owner_alert already prints, so this cannot storm.
+
+
+def _clear_target_lost() -> None:
+    """Clear the outage mark once the target is reachable again."""
+    if _mark_is_set("target-lost-mark"):
+        _set_mark("target-lost-mark", "")
+
+
+def _flatten_reason(reason: str) -> str:
+    """One-line, length-capped reason for an alert (keeps any embedded hint)."""
+    clean = " ".join((reason or "未知错误").split())
+    return clean[:300] or "未知错误"
+
+
+def _alert_send_failed(reason: str) -> None:
+    """Fire the reply-send-failure alert at most once per failure episode.
+
+    The reason is flattened (not truncated to its first line) so an embedded
+    Screen-Recording-denied hint from the screenshot fallback still reaches the
+    phone user.
+    """
+    if not should_alert_once(condition=True, already_marked=_mark_is_set("send-fail-mark")):
+        return
+    if _send_owner_alert(f"⚠️ 回传失败：{_flatten_reason(reason)}（发 /status 排查）"):
+        _set_mark("send-fail-mark")
+
+
+def _clear_send_failed() -> None:
+    """Clear the send-failure mark after a successful reply send."""
+    if _mark_is_set("send-fail-mark"):
+        _set_mark("send-fail-mark", "")
+
+
+def _send_screenshot_or_text(to_send: str) -> tuple[int, str]:
+    """Screenshot mode: send a screenshot, else fall back to text.
+
+    On a double failure the screenshot reason (incl. any Screen-Recording-denied
+    hint) is surfaced alongside the text failure so the owner alert can relay it.
+    """
+    code, msg = _send_iterm_screenshot()
+    if code == 0:
+        return code, msg
+    shot_reason = msg
+    t_code, t_msg = _send_tg(to_send, "html")
+    if t_code == 0:
+        return 0, f"screenshot failed → sent text ({shot_reason})"
+    return t_code, f"screenshot+text failed: {shot_reason}; text: {t_msg}"
+
+
 def _maybe_send_reply(capture: str, *, force: bool = False) -> tuple[int, str]:
     reply = extract_latest_reply(capture)
     if not reply:
@@ -368,21 +528,21 @@ def _maybe_send_reply(capture: str, *, force: bool = False) -> tuple[int, str]:
 
     fmt = _output_format()
     if fmt == "screenshot":
-        # New reply detected → send an iTerm screenshot instead of text.
-        code, msg = _send_iterm_screenshot()
-        if code != 0:
-            # Screenshot failed (e.g. macOS Automation/Screen-Recording perms)
-            # → fall back to text so the reply is never lost.
-            t_code, t_msg = _send_tg(to_send, "html")
-            if t_code == 0:
-                code, msg = 0, f"screenshot failed → sent text ({msg})"
+        code, msg = _send_screenshot_or_text(to_send)
     else:
         code, msg = _send_tg(to_send, fmt)
+
     if code == 0:
         _write_last_sent(reply)
         _write_last_sent_at(time.time())
         append_buffer(buf_path, to_send)
-    return code, msg or "sent"
+        _clear_send_failed()
+        return code, msg or "sent"
+
+    # Hard failure for this turn (text — and screenshot fallback if attempted):
+    # alert the owner once per failure episode so the channel isn't silently dead.
+    _alert_send_failed(msg or "send failed")
+    return code, msg or "send failed"
 
 
 def poll_once(*, tail_lines: int, force: bool = False) -> tuple[int, str]:
@@ -391,7 +551,7 @@ def poll_once(*, tail_lines: int, force: bool = False) -> tuple[int, str]:
         return code, current
 
     prev = _read_state()
-    if not force and current == prev:
+    if not force and sha1_token(current) == prev:
         return 0, "no change"
 
     _write_state(current)
@@ -436,11 +596,19 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
         ts = time.strftime("%H:%M:%S")
         if code != 0:
             print(f"[{ts}] error: {code} {current}", flush=True)
+            # Target window/tab gone → tell the phone user once per outage so
+            # they aren't left with a silently dead channel. Any other capture
+            # error is transient and just logged + retried.
+            if is_target_lost_error(current):
+                _alert_target_lost()
             if once:
                 return 1
             time.sleep(interval)
             continue
 
+        # Capture succeeded → target is reachable; reset the outage one-shot so a
+        # future outage re-alerts.
+        _clear_target_lost()
         stable_key = normalize_for_stable_compare(current)
         complete = is_reply_complete(current)
 
@@ -542,7 +710,9 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
                 is_prompt=is_prompt,
                 stable_elapsed=time.time() - stable_since,
                 threshold=auto_default,
-                stable_key=stable_key,
+                # Compare hashed tokens on both sides: the mark stores a sha1
+                # token of stable_key, so feed the matching token here.
+                stable_key=sha1_token(stable_key),
                 last_fired_key=_read_auto_default_mark(),
             ):
                 k_code, k_msg = _inject_key("enter", target)
@@ -561,7 +731,15 @@ def run_loop(*, interval: float, tail_lines: int, once: bool) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Monitor iTerm output -> Telegram (assistant reply only)")
     parser.add_argument("--interval", type=float, default=float(os.environ.get("TG_ITERM_MONITOR_INTERVAL", "5")))
-    parser.add_argument("--tail", type=int, default=int(os.environ.get("TG_ITERM_MONITOR_TAIL", "0")))
+    # Bounded default (400 lines): avoids rescanning the whole accumulated buffer
+    # every poll AND prevents a stale "Crunched for Ns" marker high in the
+    # scrollback from keeping is_reply_complete() permanently True. Set
+    # TG_ITERM_MONITOR_TAIL=0 explicitly to restore the unbounded "all" behavior.
+    parser.add_argument(
+        "--tail",
+        type=int,
+        default=int(os.environ.get("TG_ITERM_MONITOR_TAIL", str(_DEFAULT_TAIL_LINES))),
+    )
     parser.add_argument("--once", action="store_true", help="Poll once and exit")
     parser.add_argument("--force", action="store_true", help="Send even if unchanged")
     parser.add_argument("--reset", action="store_true", help="Clear state file")
@@ -569,7 +747,7 @@ def main() -> int:
 
     if args.reset:
         from iterm_log_buffer import reset as reset_log_buffer
-        for kind in ("state", "last-sent", "last-sent-at", "screenshot-mark", "auto-default-mark", "prompt-alert-mark", "shot-fp", "sent-buffer"):
+        for kind in ("state", "last-sent", "last-sent-at", "screenshot-mark", "auto-default-mark", "prompt-alert-mark", "shot-fp", "sent-buffer", "target-lost-mark", "send-fail-mark"):
             p = _monitor_file(kind)
             if p.is_file():
                 p.unlink()
