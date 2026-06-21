@@ -10,8 +10,27 @@ LOGFILE="$ROOT/inbox/tg-relay.log"
 RESTART_DELAY="${TG_RELAY_RESTART_DELAY:-3}"
 MAX_BURST="${TG_RELAY_MAX_BURST:-10}"   # max restarts within window
 BURST_WINDOW="${TG_RELAY_BURST_WINDOW:-60}"
+LOG_MAX_BYTES="${TG_RELAY_LOG_MAX_BYTES:-2097152}"   # rotate log if > 2 MB
 
 mkdir -p "$ROOT/inbox"
+
+# Print the resolved restart/backoff knobs so the user can see what's in effect.
+print_knobs() {
+  echo "  knobs: RESTART_DELAY=${RESTART_DELAY}s MAX_BURST=${MAX_BURST} BURST_WINDOW=${BURST_WINDOW}s"
+}
+
+# Rotate the log once at startup if it grew past LOG_MAX_BYTES (keeps one .1).
+# POSIX-ish: `wc -c` + mv works in bash on macOS; never fatal under set -e.
+rotate_log() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  local size
+  size="$(wc -c <"$f" 2>/dev/null | tr -d ' ')" || return 0
+  if [[ -n "$size" ]] && (( size > LOG_MAX_BYTES )); then
+    mv -f "$f" "$f.1" 2>/dev/null || : >"$f"
+    echo "▶ rotated log ($size bytes > ${LOG_MAX_BYTES}) → $f.1"
+  fi
+}
 
 usage() {
   cat <<EOF
@@ -25,6 +44,9 @@ Commands:
 
 Environment:
   TG_RELAY_RESTART_DELAY   Seconds between crash restarts (default: 3)
+  TG_RELAY_MAX_BURST       Max restarts within burst window (default: 10)
+  TG_RELAY_BURST_WINDOW    Burst window seconds (default: 60)
+  TG_RELAY_LOG_MAX_BYTES   Rotate log at startup if larger (default: 2097152)
   TG_RELAY_LOG             Log file path (default: inbox/tg-relay.log)
 
 Examples:
@@ -146,14 +168,18 @@ start_cmd() {
 
   stop_all || true
 
+  rotate_log "$LOGFILE"
+
   if [[ "$fg" -eq 1 ]]; then
     echo "▶ tg-relay daemon (foreground, auto-restart)"
+    print_knobs
     echo "  log: $LOGFILE"
     exec >>"$LOGFILE" 2>&1 </dev/null
     run_foreground_loop
   fi
 
   echo "▶ tg-relay daemon (background)"
+  print_knobs
   nohup "$0" start --foreground >>"$LOGFILE" 2>&1 </dev/null &
   disown 2>/dev/null || true
 
@@ -163,17 +189,13 @@ start_cmd() {
       local dpid
       dpid="$(cat "$PIDFILE" 2>/dev/null || true)"
       if [[ -n "${dpid:-}" ]] && kill -0 "$dpid" 2>/dev/null; then
-        echo "  ✓ daemon pid=$dpid"
-        echo "  log: $LOGFILE"
-        echo "  stop: ./mob tg-stop"
-        return 0
+        verify_worker_alive "$dpid"
+        return $?
       fi
     fi
     if relay_pids | grep -q .; then
-      echo "  ✓ tg-relay running pids: $(relay_pids | tr '\n' ' ')"
-      echo "  log: $LOGFILE"
-      echo "  stop: ./mob tg-stop"
-      return 0
+      verify_worker_alive ""
+      return $?
     fi
     sleep 0.25
     waited=$((waited + 1))
@@ -182,6 +204,33 @@ start_cmd() {
   echo "  ✗ daemon failed to start — see $LOGFILE" >&2
   rm -f "$PIDFILE"
   exit 1
+}
+
+# After the supervisor wrapper comes up, the child python may still crash-loop.
+# Wait ~2s and confirm a real tg-relay.py worker is alive before claiming success;
+# otherwise print FAILURE + the last log lines so the user sees the real error
+# instead of a false green. $1 = supervisor pid (may be empty).
+verify_worker_alive() {
+  local dpid="$1"
+  sleep 2
+  local pids
+  pids="$(relay_pids | tr '\n' ' ' | sed 's/ $//')"
+  if [[ -n "$pids" ]]; then
+    [[ -n "$dpid" ]] && echo "  ✓ daemon pid=$dpid" || echo "  ✓ tg-relay running"
+    echo "  ✓ worker alive (pids: $pids)"
+    echo "  log: $LOGFILE"
+    echo "  stop: ./mob tg-stop"
+    return 0
+  fi
+  echo "  ✗ FAILURE: tg-relay worker died right after start (crash-loop)" >&2
+  if ! python3 -c "import telegram" >/dev/null 2>&1; then
+    echo "  ✗ python-telegram-bot not importable — run: python3 -m pip install python-telegram-bot" >&2
+  fi
+  if [[ -f "$LOGFILE" ]]; then
+    echo "  ── last 15 log lines ($LOGFILE) ──" >&2
+    tail -n 15 "$LOGFILE" >&2
+  fi
+  return 1
 }
 
 cmd="${1:-start}"

@@ -106,6 +106,22 @@ else
   step "4/4 已跳过 ./mob check（--skip-check）"
 fi
 
+# ── 管道自检（含 macOS 自动化权限探测）──
+# 复用 term-bridge/pipeline_doctor.py：首次安装即让用户知道需要授予 macOS
+# 自动化权限，否则第一条手机消息会静默失败。仅 WARN，绝不中断安装
+# （本脚本启用了 set -euo pipefail，故所有可能失败的命令都用 || true 兜底）。
+DOCTOR="$ROOT/term-bridge/pipeline_doctor.py"
+if [[ -f "$DOCTOR" ]]; then
+  step "管道自检（pipeline doctor）"
+  if python3 "$DOCTOR"; then
+    info "管道自检通过 ✓"
+  else
+    warn "管道自检发现问题（见上）：常见为未授予 macOS 自动化权限 —— 请在「系统设置 ▸ 隐私与安全性 ▸ 自动化」中允许，再发第一条 Telegram 消息"
+  fi || true
+else
+  warn "未找到 pipeline doctor（$DOCTOR），跳过管道自检"
+fi
+
 echo
 echo "${BOLD}${GREEN}✓ 安装完成${RESET}"
 cat <<EOF

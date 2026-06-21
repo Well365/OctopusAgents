@@ -32,6 +32,12 @@ else warn ".env missing (copy .env.example → mobile-agent/.env)"; fi
 if command -v tg-notify >/dev/null 2>&1 && [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
   pass "tgkit configured"
 else warn "run: ./mob-compose/setup"; fi
+# python-telegram-bot is the runtime dep ./mob up needs; missing → bot crash-loops.
+if python3 -c "import telegram" >/dev/null 2>&1; then
+  pass "python-telegram-bot importable (telegram)"
+else
+  fail "python-telegram-bot missing — ./mob up will crash-loop; run: python3 -m pip install python-telegram-bot"
+fi
 
 section "Android"
 if command -v droid-ctl >/dev/null 2>&1; then
@@ -64,6 +70,22 @@ section "LLM Skills"
 for s in tg-notify adb ios; do
   [[ -f "$HOME/.cursor/skills/$s/SKILL.md" ]] && pass "cursor: $s" || warn "cursor: $s missing"
 done
+
+section "TG → terminal pipeline"
+# Reuse the single source of truth: term-bridge/pipeline_doctor.py. It includes a
+# real macOS automation-permission probe, so first-run users learn they must grant
+# permission BEFORE their first phone message silently fails. Best-effort: never
+# aborts this script (set -e safe via the if-guard).
+DOCTOR="$MONOREPO_ROOT/term-bridge/pipeline_doctor.py"
+if [[ -f "$DOCTOR" ]]; then
+  if python3 "$DOCTOR" | sed 's/^/  /'; then
+    pass "pipeline doctor: all checks passed"
+  else
+    warn "pipeline doctor reported issues (see above; e.g. grant macOS automation permission)"
+  fi
+else
+  warn "pipeline doctor not found at $DOCTOR"
+fi
 
 echo ""
 echo "summary: ${OK} ok, ${WARN} warn, ${FAIL} fail"

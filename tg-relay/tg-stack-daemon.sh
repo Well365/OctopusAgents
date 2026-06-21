@@ -14,8 +14,27 @@ ENV_FILE="$ROOT/.env"
 MON_RESTART_DELAY="${TG_MONITOR_RESTART_DELAY:-3}"
 MON_MAX_BURST="${TG_MONITOR_MAX_BURST:-10}"
 MON_BURST_WINDOW="${TG_MONITOR_BURST_WINDOW:-60}"
+MON_LOG_MAX_BYTES="${TG_MONITOR_LOG_MAX_BYTES:-2097152}"   # rotate log if > 2 MB
 
 mkdir -p "$ROOT/inbox"
+
+# Print the resolved restart/backoff knobs so the user can see what's in effect.
+print_monitor_knobs() {
+  echo "  knobs: MON_RESTART_DELAY=${MON_RESTART_DELAY}s MON_MAX_BURST=${MON_MAX_BURST} MON_BURST_WINDOW=${MON_BURST_WINDOW}s"
+}
+
+# Rotate the log once at startup if it grew past MON_LOG_MAX_BYTES (keeps one .1).
+# POSIX-ish: `wc -c` + mv works in bash on macOS; never fatal under set -e.
+rotate_log() {
+  local f="$1"
+  [[ -f "$f" ]] || return 0
+  local size
+  size="$(wc -c <"$f" 2>/dev/null | tr -d ' ')" || return 0
+  if [[ -n "$size" ]] && (( size > MON_LOG_MAX_BYTES )); then
+    mv -f "$f" "$f.1" 2>/dev/null || : >"$f"
+    echo "▶ rotated log ($size bytes > ${MON_LOG_MAX_BYTES}) → $f.1"
+  fi
+}
 
 usage() {
   cat <<EOF
@@ -107,7 +126,10 @@ start_monitor() {
     return 1
   fi
 
+  rotate_log "$ITERM_LOG"
+
   echo "▶ iterm-monitor daemon (background, auto-restart)"
+  print_monitor_knobs
   # 后台拉起看护循环（自身崩溃/被杀后自动重启 python）
   nohup "$0" _monitor-loop >>"$ITERM_LOG" 2>&1 </dev/null &
   disown 2>/dev/null || true
@@ -118,9 +140,8 @@ start_monitor() {
       local dpid
       dpid="$(cat "$ITERM_PIDFILE" 2>/dev/null || true)"
       if [[ -n "${dpid:-}" ]] && kill -0 "$dpid" 2>/dev/null; then
-        echo "  ✓ iterm-monitor supervisor pid=$dpid"
-        echo "  log: $ITERM_LOG"
-        return 0
+        verify_monitor_alive "$dpid"
+        return $?
       fi
     fi
     sleep 0.25
@@ -129,6 +150,32 @@ start_monitor() {
 
   echo "  ✗ iterm-monitor failed to start — see $ITERM_LOG" >&2
   rm -f "$ITERM_PIDFILE"
+  return 1
+}
+
+# The supervisor wrapper being alive doesn't mean the python worker survived —
+# it may crash-loop immediately (e.g. missing dep / permission). Wait ~2s and
+# confirm a real iterm-monitor.py worker is running before printing success;
+# otherwise print FAILURE + the last log lines so the user sees the real error.
+verify_monitor_alive() {
+  local dpid="$1"
+  sleep 2
+  local pids
+  pids="$(monitor_pids | tr '\n' ' ' | sed 's/ $//')"
+  if [[ -n "$pids" ]]; then
+    echo "  ✓ iterm-monitor supervisor pid=$dpid"
+    echo "  ✓ worker alive (pids: $pids)"
+    echo "  log: $ITERM_LOG"
+    return 0
+  fi
+  echo "  ✗ FAILURE: iterm-monitor worker died right after start (crash-loop)" >&2
+  if ! python3 -c "import telegram" >/dev/null 2>&1; then
+    echo "  ✗ python-telegram-bot not importable — run: python3 -m pip install python-telegram-bot" >&2
+  fi
+  if [[ -f "$ITERM_LOG" ]]; then
+    echo "  ── last 15 log lines ($ITERM_LOG) ──" >&2
+    tail -n 15 "$ITERM_LOG" >&2
+  fi
   return 1
 }
 
@@ -198,7 +245,9 @@ start_all() {
   echo "╚══════════════════════════════════════════╝"
   echo ""
 
-  "$RELAY_DAEMON" start
+  # Guarded: tg-relay-daemon now exits non-zero if the worker crash-loops on
+  # startup. Surface that, but still attempt the monitor (matches start_monitor).
+  "$RELAY_DAEMON" start || echo "  ! tg-relay failed to start cleanly — see above / ./mob tg-status" >&2
   echo ""
   start_monitor || true
 

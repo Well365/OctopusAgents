@@ -4,14 +4,16 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE="$ROOT/mob-compose/compose"
 
-# Active terminal backend: TG_TERM_BACKEND env, else .env, else iterm.
+# Active terminal backend: TG_TERM_BACKEND env, else .env, else terminal.
+# Default MUST match the Python side (term_backend.py) and README, which both
+# default to "terminal" — otherwise the CLI and the daemon disagree on backend.
 term_backend() {
   local b="${TG_TERM_BACKEND:-}"
   if [[ -z "$b" && -f "$ROOT/.env" ]]; then
     b="$(grep -E '^[[:space:]]*TG_TERM_BACKEND=' "$ROOT/.env" | tail -1 | cut -d= -f2 | tr -d " \"'")"
   fi
-  b="$(printf '%s' "${b:-iterm}" | tr '[:upper:]' '[:lower:]')"
-  [[ "$b" == "terminal" ]] && echo terminal || echo iterm
+  b="$(printf '%s' "${b:-terminal}" | tr '[:upper:]' '[:lower:]')"
+  [[ "$b" == "iterm" ]] && echo iterm || echo terminal
 }
 
 cmd="${1:-}"
@@ -99,6 +101,122 @@ case "$cmd" in
   install-skill)
     exec "$ROOT/scripts/install-skill.sh" "$@"
     ;;
+  config-check|doctor-pipeline|pipeline-doctor)
+    # Pipeline health doctor — reuses term-bridge/pipeline_doctor.py (✅/⚠️/❌,
+    # exit 1 on any failure). Single source of truth; never reimplement in bash.
+    exec python3 "$ROOT/term-bridge/pipeline_doctor.py" "$@"
+    ;;
+  clean)
+    # Remove monitor/session state files for tabs that are no longer open.
+    # Conservative: only ever touches inbox/iterm-monitor-* and inbox/iterm-session-*.
+    # Live tabs are read via term-bridge (iterm_route.list_tabs). If that can't
+    # be enumerated, falls back to deleting state files older than --days N (7).
+    #   ./mob clean            # remove state for closed tabs (dry-run shows plan)
+    #   ./mob clean --apply    # actually delete
+    #   ./mob clean --days 14  # age-based fallback threshold
+    exec env MOB_ROOT="$ROOT" python3 - "$@" <<'PYCLEAN'
+import os, re, sys, time
+from pathlib import Path
+
+ROOT = Path(os.environ["MOB_ROOT"])
+INBOX = ROOT / "inbox"
+sys.path.insert(0, str(ROOT / "term-bridge"))
+
+apply = False
+days = 7
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+    a = args[i]
+    if a in ("--apply", "-f", "--force"):
+        apply = True
+    elif a in ("--days", "-d"):
+        i += 1
+        try:
+            days = int(args[i])
+        except (IndexError, ValueError):
+            print("--days needs an integer", file=sys.stderr)
+            raise SystemExit(2)
+    elif a in ("-h", "--help"):
+        print("Usage: mob clean [--apply] [--days N]")
+        print("  Removes inbox/iterm-monitor-* and inbox/iterm-session-* state")
+        print("  for tabs no longer open. Without --apply it only prints the plan.")
+        raise SystemExit(0)
+    else:
+        print(f"unknown option: {a}", file=sys.stderr)
+        raise SystemExit(2)
+    i += 1
+
+if not INBOX.is_dir():
+    print(f"(no inbox dir at {INBOX})")
+    raise SystemExit(0)
+
+# Live tab suffixes, e.g. {"w81-t1", ...}. Empty set + ok=False → age fallback.
+live = set()
+have_live = False
+try:
+    from iterm_route import list_tabs
+    code, tabs = list_tabs()
+    if code == 0:
+        have_live = True
+        for t in tabs:
+            live.add(f"w{t.window}-t{t.tab}")
+except Exception as exc:
+    print(f"(could not enumerate live tabs: {exc} — using age fallback)")
+
+# Only ever consider these two families. Never anything else in inbox/.
+candidates = sorted(
+    p for p in INBOX.glob("iterm-monitor-*") if p.is_file()
+) + sorted(
+    p for p in INBOX.glob("iterm-session-*") if p.is_file()
+)
+
+# Suffix extractor: iterm-monitor-<wX-tY>.<ext> / iterm-session-<wX-tY>.log
+_suf = re.compile(r"^iterm-(?:monitor|session)-(w\d+-t\d+)\b")
+# Never remove the live daemon pidfile / shared aggregate logs.
+_protected = {"iterm-monitor-daemon.pid", "iterm-monitor.log"}
+
+cutoff = time.time() - days * 86400
+to_remove = []
+for p in candidates:
+    if p.name in _protected:
+        continue
+    m = _suf.match(p.name)
+    if have_live and m:
+        if m.group(1) not in live:
+            to_remove.append(p)
+    elif not have_live:
+        # Age-based fallback: only files older than N days.
+        try:
+            if p.stat().st_mtime < cutoff:
+                to_remove.append(p)
+        except OSError:
+            pass
+
+if have_live:
+    print(f"live tabs: {sorted(live) or '(none)'}")
+else:
+    print(f"age-fallback: removing closed-tab state older than {days} days")
+
+if not to_remove:
+    print("nothing to clean ✓")
+    raise SystemExit(0)
+
+verb = "removing" if apply else "would remove"
+for p in to_remove:
+    print(f"  {verb}: {p.name}")
+    if apply:
+        try:
+            p.unlink()
+        except OSError as exc:
+            print(f"    ! failed: {exc}", file=sys.stderr)
+
+if apply:
+    print(f"✓ removed {len(to_remove)} file(s)")
+else:
+    print(f"({len(to_remove)} file(s) — re-run with --apply to delete)")
+PYCLEAN
+    ;;
   ""|help|-h|--help)
     "$COMPOSE" help
     cat <<'EOF'
@@ -124,6 +242,11 @@ mob-remote extras:
   term-monitor-once  Extract latest reply and send once to TG
   install-skill  Install skills (composable: --only tg-notify,droid-ctl,iphone-ctl)
                  ./mob install-skill --list
+  config-check   Run the pipeline health doctor (daemons, token, backend,
+                 macOS automation permission); exits non-zero on any failure
+  clean          Remove inbox state (iterm-monitor-*/iterm-session-*) for
+                 closed tabs. Dry-run by default; --apply deletes, --days N
+                 sets the age fallback when live tabs can't be enumerated
 
 Backend: TG_TERM_BACKEND=iterm|terminal selects target. inject/capture/shot and
   term-* follow it; force with iterm-inject / terminal-inject (also -capture / -screenshot).

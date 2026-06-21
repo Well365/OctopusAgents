@@ -96,6 +96,16 @@ for pkg in "${PKGS[@]}"; do
   fi
 done
 
+# tg-relay runtime dep: python-telegram-bot. `./mob up` imports `telegram`,
+# so without this the bot crash-loops even though setup "succeeded".
+# Mirror tg-relay/setup-telegram.sh: prefer v20-21, fall back to legacy 12.x.
+if want tg; then
+  echo "  pip install python-telegram-bot (for ./mob up / tg-relay)"
+  python3 -m pip install "python-telegram-bot>=20,<22" -q 2>/dev/null \
+    || python3 -m pip install "python-telegram-bot>=12.8,<13" -q \
+    || echo "  ! python-telegram-bot install failed — ./mob up will crash-loop; run: python3 -m pip install python-telegram-bot"
+fi
+
 # droid-ctl vendor platform-tools
 if want adb && command -v droid-ctl >/dev/null 2>&1; then
   droid-ctl install-tools 2>/dev/null || droid-ctl which
