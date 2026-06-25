@@ -1,9 +1,11 @@
 """High-level Android device operations."""
 
 import os
+import re
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 from droid_ctl.core.device import resolve_serial, screen_size
 from droid_ctl.core.runner import AdbRunner
@@ -65,6 +67,54 @@ class Device:
 
     def shell(self, command: str) -> str:
         return self.runner.shell(command)
+
+    def _screen_wh(self) -> Tuple[int, int]:
+        """(width, height) in px from `wm size`; falls back to a common default."""
+        out = self.shell("wm size")
+        m = re.search(r"(\d+)\s*x\s*(\d+)", out or "")
+        if not m:
+            return (1080, 2400)
+        return int(m.group(1)), int(m.group(2))
+
+    def is_locked(self) -> bool:
+        """True if the keyguard / lockscreen is currently showing."""
+        out = self.shell("dumpsys window") or ""
+        for key in ("mDreamingLockscreen", "mShowingLockscreen", "isStatusBarKeyguard"):
+            m = re.search(rf"{key}=(\w+)", out)
+            if m and m.group(1) == "true":
+                return True
+        return False
+
+    def unlock(self, pin: str, *, wake: bool = True, settle: float = 0.6) -> Dict[str, Any]:
+        """Unlock a numeric-PIN lockscreen: wake -> swipe up -> type PIN -> Enter.
+
+        Only digits are sent (via keyevents 7-16 = KEYCODE_0..9), so the PIN
+        never appears as plaintext in `input text`. Pattern/biometric unlock is
+        NOT supported. Returns a status dict (does NOT include the PIN).
+        """
+        digits = [c for c in pin if c.isdigit()]
+        if not digits:
+            raise ValueError("unlock PIN must contain digits")
+        was_locked = self.is_locked()
+        w, h = self._screen_wh()
+        if wake:
+            self.keyevent(224)  # KEYCODE_WAKEUP
+            time.sleep(settle)
+        # swipe up from lower-middle to upper-middle to reveal the PIN pad
+        self.swipe(w // 2, int(h * 0.80), w // 2, int(h * 0.20), 250)
+        time.sleep(settle)
+        for d in digits:
+            self.keyevent(7 + int(d))  # KEYCODE_0 == 7
+        self.keyevent(66)  # ENTER submits
+        time.sleep(settle)
+        return {
+            "ok": True,
+            "device": self.serial,
+            "was_locked": was_locked,
+            "now_locked": self.is_locked(),
+            "screen": f"{w}x{h}",
+            "pin_digits": len(digits),
+        }
 
     def install(self, apk_path: Union[str, Path]) -> str:
         result = self.runner.run(

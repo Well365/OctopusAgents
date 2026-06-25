@@ -103,7 +103,8 @@
 
 | # | 功能 | 说明 |
 |---|------|------|
-| F1 | `/unlock` 远程解锁 Android | 数字 PIN：唤醒→上滑→输 PIN→回车（PIN 存 .env） |
+| ✅ F1 | `/unlock` 远程解锁 Android — 完成 | droid-ctl `unlock`（动态算坐标、逐位 keyevent 输 PIN、PIN 不进 argv）+ relay `/unlock` 命令 + 菜单；PIN 存 `.env` `ANDROID_UNLOCK_PIN`。测试 6 项；唤醒实测有效。仅数字 PIN，图案/指纹不支持。 |
+| ✅ F9 | Mac 隐私遮罩 `/lockmac` — 完成 | 盖屏防窥但**不锁机**（远程操作/截图不受影响）。Swift `CGShieldingWindowLevel` 全屏遮罩（盖菜单栏/Dock/所有 Space）+ **三重解除防锁死**：本地密码(salted SHA-256，break-glass) / TG `/lockmac off` / `--timeout` 兜底 + LaunchAgent 开机自启（读 `enable_on_boot`）。`./mob veil setup` 一次设置。测试 10 项；遮罩+解除+LaunchAgent 装卸均实测。**边界**：用户态遮罩，Force-Quit/SSH kill/重启可绕过——隐私级非安全锁。 |
 | F2 | 审计日志 + `/last` | 回看最近注入/回复，安全可追溯 |
 | F3 | 高危命令二次确认 | 注入含 `rm -rf` 等模式时要求确认 |
 | F4 | 多 Mac / 多设备编排 | 一个 bot 管多机，`/host` 切换 |

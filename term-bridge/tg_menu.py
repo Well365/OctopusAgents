@@ -16,6 +16,8 @@ MENU_COMMANDS: list[tuple[str, str]] = [
     ("shot", "截图：设备 / Mac 屏幕 / 终端"),
     ("format", "设置回传格式"),
     ("devices", "列出设备"),
+    ("unlock", "解锁 Android（数字 PIN）"),
+    ("lockmac", "隐私遮罩：盖屏防窥，不锁机（on/off）"),
     ("check", "环境检查"),
     ("stop", "关闭弹窗 / 取消输入 (Esc)"),
     ("interrupt", "停止运行 (Ctrl-C)"),
@@ -57,6 +59,7 @@ SUBMENUS: dict[str, list[tuple[str, str]]] = {
         ("max", "think:max"),
         ("auto", "think:auto"),
     ],
+    "/lockmac": [("on 开遮罩", "lockmac:on"), ("off 解除", "lockmac:off")],
 }
 
 # callback action prefix → slash command base
@@ -68,6 +71,7 @@ _ACTION_TO_CMD: dict[str, str] = {
     "think": "/think",
     "tab": "/tab",
     "sel": "/sel",  # interactive-prompt option button → /sel <window>:<tab>:<n>
+    "lockmac": "/lockmac",
 }
 
 

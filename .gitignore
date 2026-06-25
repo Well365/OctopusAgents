@@ -61,3 +61,4 @@ artifacts/
 **/DerivedData/
 **/*.xcuserstate
 **/*.xcuserdata/
+term-bridge/.bin/

@@ -50,6 +50,9 @@ case "$cmd" in
   tg-inbox)
     exec cat "$ROOT/inbox/pending.txt" 2>/dev/null || echo "(inbox empty)"
     ;;
+  lockmac|veil)
+    exec lockmac "$@"
+    ;;
   # Backend-aware (respect TG_TERM_BACKEND=iterm|terminal)
   inject|tg-iterm|term-inject)
     exec python3 "$ROOT/term-bridge/$(term_backend)-inject.py" "$@"

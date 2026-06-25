@@ -228,8 +228,8 @@ def _handle_command(text: str) -> str:
             "/tap X Y [android|ios]\n"
             "/swipe X1 Y1 X2 Y2 [android|ios]\n"
             "/devices — list devices\n\n"
-            "Natural language -> iTerm (1st window) + inbox\n"
-            "  (enable: TG_RELAY_ITERM_INJECT=1 in .env)"
+            "Natural language -> terminal (routed tab) + inbox\n"
+            "  (injection on by default; set TG_RELAY_ITERM_INJECT=0 to disable)"
         )
 
     if cmd == "/check":
@@ -241,6 +241,33 @@ def _handle_command(text: str) -> str:
             code, out = _run([cli, "devices"])
             lines.append(f"{label}:\n{out or f'exit {code}'}")
         return "\n\n".join(lines)[:4000]
+
+    if cmd == "/unlock":
+        # Numeric-PIN unlock of an Android device. PIN comes from the env
+        # (ANDROID_UNLOCK_PIN), inherited by the child — never passed on argv.
+        if not os.environ.get("ANDROID_UNLOCK_PIN", "").strip():
+            return "未配置 PIN：在 .env 设 ANDROID_UNLOCK_PIN=数字密码（仅支持数字 PIN 锁）"
+        code, out = _run(["droid-ctl", "unlock"])
+        if code != 0:
+            return out or f"解锁失败 ({code})"
+        # screenshot the result so you can confirm it worked
+        _run([str(ROOT / "mob-compose" / "scripts" / "shot-android.sh"), "-c", "解锁后"])
+        return f"{out}\n（已截图发送确认）" if out else "已尝试解锁（截图已发）"
+
+    if cmd == "/lockmac":
+        # delegates to the standalone `lockmac` package (CLI on PATH)
+        sub = args[0].lower() if args else "status"
+        if sub == "on":
+            code, out = _run(["lockmac", "on"])
+            return f"{out}\n（旁人看物理屏=黑；你 /shot 截图仍拿真实内容）" if code == 0 else out
+        if sub == "off":
+            return _run(["lockmac", "off"])[1]
+        if sub == "boot":
+            val = args[1].lower() if len(args) > 1 else ""
+            if val in ("on", "off"):
+                return _run(["lockmac", "boot", val])[1]
+            return "用法: /lockmac boot on|off"
+        return _run(["lockmac", "status"])[1] + "\n用法: /lockmac on | off | boot on|off"
 
     if cmd == "/shot" and args:
         platform = args[0].lower()

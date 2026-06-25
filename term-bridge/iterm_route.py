@@ -73,7 +73,7 @@ def list_tabs() -> tuple[int, list[TabInfo]]:
 
 
 def _parse_aliases() -> dict[str, ItermTarget]:
-    """TG_ITERM_ALIASES=fz:1:7,mobile:1:11,texus:1:4  (alias:window:tab)"""
+    """TG_ITERM_ALIASES=work:1:7,mobile:1:11,task:1:4  (alias:window:tab)"""
     raw = os.environ.get("TG_ITERM_ALIASES", "").strip()
     out: dict[str, ItermTarget] = {}
     if not raw:

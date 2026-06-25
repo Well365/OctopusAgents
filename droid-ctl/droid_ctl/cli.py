@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -103,6 +104,16 @@ def cmd_input(args) -> int:
 def cmd_key(args) -> int:
     Device(serial=args.serial).keyevent(args.key)
     print(f"keyevent: {args.key}")
+    return 0
+
+
+def cmd_unlock(args) -> int:
+    pin = args.pin or os.environ.get("ANDROID_UNLOCK_PIN", "")
+    if not pin:
+        print("unlock: no PIN (pass --pin or set ANDROID_UNLOCK_PIN)", file=sys.stderr)
+        return 1
+    result = Device(serial=args.serial).unlock(pin)
+    print(json.dumps(result, ensure_ascii=False))
     return 0
 
 
@@ -210,6 +221,10 @@ def main(argv=None) -> int:
     p = sub.add_parser("key", help="Send keyevent (HOME, BACK, or code)")
     p.add_argument("key")
     p.set_defaults(func=cmd_key)
+
+    p = sub.add_parser("unlock", help="Unlock a numeric-PIN lockscreen (wake/swipe/PIN/Enter)")
+    p.add_argument("--pin", default=None, help="PIN digits (or set ANDROID_UNLOCK_PIN)")
+    p.set_defaults(func=cmd_unlock)
 
     p = sub.add_parser("shell", help="Run adb shell command")
     p.add_argument("command")
